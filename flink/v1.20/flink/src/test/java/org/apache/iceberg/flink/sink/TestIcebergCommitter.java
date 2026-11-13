@@ -213,6 +213,31 @@ class TestIcebergCommitter extends TestBase {
   }
 
   @TestTemplate
+  void aggregatorFinishEmitsCommittableForNextCheckpoint() throws Exception {
+    try (OneInputStreamOperatorTestHarness<
+            CommittableMessage<WriteResult>, CommittableMessage<IcebergCommittable>>
+        harness =
+            new OneInputStreamOperatorTestHarness<>(
+                new IcebergWriteAggregator(tableLoader, SINK_ID))) {
+      harness.open();
+      harness.prepareSnapshotPreBarrier(1L);
+      harness.getOutput().clear();
+
+      harness.processElement(
+          new StreamRecord<>(new CommittableWithLineage<>(of(dataFileTest1), 2L, 0)));
+      harness.getOperator().finish();
+      harness.prepareSnapshotPreBarrier(2L);
+
+      List<StreamElement> output = transformsToStreamElement(harness.getOutput());
+      assertThat(output).hasSize(2);
+      SinkV2Assertions.assertThat(extractAndAssertCommittableSummary(output.get(0)))
+          .hasCheckpointId(2L);
+      SinkV2Assertions.assertThat(extractAndAssertCommittableWithLineage(output.get(1)))
+          .hasCheckpointId(2L);
+    }
+  }
+
+  @TestTemplate
   public void testCommitTxnWithoutDataFiles() throws Exception {
     IcebergCommitter committer = getCommitter();
     SimpleDataUtil.assertTableRows(table, Lists.newArrayList(), branch);
@@ -1165,12 +1190,12 @@ class TestIcebergCommitter extends TestBase {
 
       testHarness.open();
 
-      long checkpointId = Long.MAX_VALUE;
+      long checkpointId = 1;
       processElement(jobId, checkpointId, testHarness, 1, OPERATOR_ID, dataFileTest1);
 
       testHarness.endInput();
 
-      assertMaxCommittedCheckpointId(jobId, OPERATOR_ID, Long.MAX_VALUE);
+      assertMaxCommittedCheckpointId(jobId, OPERATOR_ID, checkpointId);
 
       List<StreamElement> output = transformsToStreamElement(testHarness.getOutput());
       assertThat(output).hasSize(2);

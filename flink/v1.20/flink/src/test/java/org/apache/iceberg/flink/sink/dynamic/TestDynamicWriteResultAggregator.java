@@ -215,6 +215,34 @@ class TestDynamicWriteResultAggregator {
     }
   }
 
+  @Test
+  void finishEmitsCommittablesForNextCheckpoint() throws Exception {
+    CATALOG_EXTENSION.catalog().createTable(TableIdentifier.of("table"), new Schema());
+    TableKey tableKey = new TableKey("table", "branch");
+
+    try (OneInputStreamOperatorTestHarness<
+            CommittableMessage<DynamicWriteResult>, CommittableMessage<DynamicCommittable>>
+        testHarness =
+            new OneInputStreamOperatorTestHarness<>(
+                new DynamicWriteResultAggregator(
+                    CATALOG_EXTENSION.catalogLoader(), cacheMaximumSize, "sinkId"))) {
+      testHarness.open();
+      testHarness.prepareSnapshotPreBarrier(1L);
+      testHarness.getOutput().clear();
+
+      testHarness.processElement(createRecord(tableKey, 2L, DATA_FILE.specId(), DATA_FILE));
+      testHarness.getOperator().finish();
+      testHarness.prepareSnapshotPreBarrier(2L);
+
+      List<CommittableMessage<DynamicCommittable>> outputValues = testHarness.extractOutputValues();
+      assertThat(outputValues).hasSize(2);
+      SinkV2Assertions.assertThat(extractAndAssertCommittableSummary(outputValues.get(0)))
+          .hasCheckpointId(2L);
+      SinkV2Assertions.assertThat(extractAndAssertCommittableWithLineage(outputValues.get(1)))
+          .hasCheckpointId(2L);
+    }
+  }
+
   private static Set<String> getManifestPaths(
       List<StreamRecord<CommittableMessage<DynamicCommittable>>> messages) throws IOException {
     Set<String> manifestPaths = Sets.newHashSet();
